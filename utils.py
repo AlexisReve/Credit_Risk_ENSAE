@@ -1,5 +1,4 @@
 import pandas as pd
-import numpy as np
 import os
 import re
 import io
@@ -14,7 +13,8 @@ from sklearn.compose import ColumnTransformer
 from sklearn.calibration import calibration_curve
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.impute import SimpleImputer
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from xgboost import XGBClassifier
 from sklearn.preprocessing import StandardScaler, MaxAbsScaler, MinMaxScaler
 from sklearn.metrics import make_scorer, f1_score, balanced_accuracy_score
 import seaborn as sns
@@ -41,7 +41,7 @@ def draw_roc_curve(y_test, y_pred_prob, model):
     # Calcul de l'aire sous la courbe ROC (AUC)
     roc_auc = auc(fpr, tpr)
     
-    plt.figure(figsize = (14, 8))
+    plt.figure(figsize = (10, 6))
     plt.plot(fpr, tpr, label="ROC curve(area = %0.3f)" % roc_auc)
     plt.plot([0, 1], [0, 1], color="red",label="Random Baseline", linestyle="--")
     plt.grid(color='gray', linestyle='--', linewidth=0.5)
@@ -56,6 +56,7 @@ def draw_calibration_curve(y_test, y_pred_prob, model):
     frac_pos, mean_pred = calibration_curve(y_test,  y_pred_prob, n_bins=10)
 
     # Plot the calibration curve
+    plt.figure(figsize = (10, 6))
     plt.plot(mean_pred, frac_pos, 's-', label=model)
     plt.plot([0, 1], [0, 1], 'k--', label='Perfectly calibrated')
     plt.xlabel('Mean predicted value')
@@ -65,25 +66,8 @@ def draw_calibration_curve(y_test, y_pred_prob, model):
     plt.show()
 
 
-def draw_features_importance(pipeline, model, randomF = False):
-    if randomF:
-        coefficients = pipeline.named_steps[model].feature_importances_
-    else: 
-        coefficients = pipeline.named_steps[model].coef_[0]
-    
-    feature_names = pipeline.named_steps['preprocessor'].get_feature_names_out()
-    # Tracer l'importance des caractéristiques
-    plt.figure(figsize=(12, 8))
-    plt.barh(feature_names, coefficients, color='skyblue')
-    plt.xlabel("Features' Importance")
-    plt.ylabel('Caractéristiques')
-    plt.title("Features' Importance")
-    plt.grid(True)
-    plt.show()
-
-
 def draw_prob_distribution(y_pred_prob, model):
-    plt.figure(figsize=(10, 8))
+    plt.figure(figsize = (10, 6))
     plt.hist(y_pred_prob, bins=10, range=(0, 1), color='blue', alpha=0.7)
     
     plt.xlim(0, 1)
@@ -95,3 +79,191 @@ def draw_prob_distribution(y_pred_prob, model):
     plt.grid(True)
     plt.show()
 
+
+def pipeline_logreg_benchmark(X_train, y_train, X_test, y_test, model_result):
+    pipeline = Pipeline(steps=[
+    ('preprocessor', StandardScaler()),
+    ('LogisticRegression_Benchmark', LogisticRegression(solver='saga', class_weight = weight_dict,
+                                  max_iter=5000, n_jobs=-1))  
+])
+    pipeline.fit(X_train, y_train)
+
+    y_pred = pipeline.predict(X_test)
+    y_pred_prob = pipeline.predict_proba(X_test)[:, 1]
+    
+    fpr, tpr, thresholds = roc_curve(y_test, y_pred_prob, pos_label = 1)
+    model = "LogisticRegression_Benchmark"
+    result = pd.DataFrame({"Model" : [model],
+                       "Accuracy" : [accuracy_score(y_test, y_pred)],
+                       "Recall" : [recall_score(y_test, y_pred)],
+                       "F1_score" : [f1_score(y_test, y_pred, average="macro")],
+                       "AUC" : [auc(fpr, tpr)]}
+                       )
+    model_result = pd.concat([model_result, result])
+
+    
+    draw_confusion_matrix(y_test, y_pred, model)
+    draw_roc_curve(y_test, y_pred_prob, model)
+    draw_prob_distribution(y_pred_prob, model)
+    draw_calibration_curve(y_test, y_pred_prob, model)
+    return model_result
+
+
+def pipeline_logreg_cv(X_train, y_train, X_test, y_test, model_result):
+    #y_train = y_train['SeriousDlqin2yrs']
+    param_grid = {'LogisticRegression_cv__C': np.logspace(-10, 6, 17, base=2),
+              'LogisticRegression_cv__penalty': ['l1', 'l2'],
+               'LogisticRegression_cv__class_weight': ['balanced', weight_dict]} 
+    pipeline = Pipeline(steps=[
+    ('preprocessor', StandardScaler()),
+    ('LogisticRegression_cv', LogisticRegression(solver='saga', max_iter=5000))  
+])
+    grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring=make_scorer(f1_score), error_score='raise',
+                          n_jobs=-1)
+
+    grid_search.fit(X_train, y_train)
+    y_pred = grid_search.predict(X_test)
+    y_pred_prob = grid_search.predict_proba(X_test)[:, 1]
+    best_pipeline = grid_search.best_estimator_
+    fpr, tpr, thresholds = roc_curve(y_test, y_pred_prob, pos_label = 1)
+    model = "LogisticRegression_cv"
+    result = pd.DataFrame({"Model" : [model],
+                       "Accuracy" : [accuracy_score(y_test, y_pred)],
+                       "Recall" : [recall_score(y_test, y_pred)],
+                       "F1_score" : [f1_score(y_test, y_pred, average="macro")],
+                       "AUC" : [auc(fpr, tpr)]}
+                       )
+    model_result = pd.concat([model_result, result])
+    
+    draw_confusion_matrix(y_test, y_pred, model)
+    draw_roc_curve(y_test, y_pred_prob, model)
+    draw_prob_distribution(y_pred_prob, model)
+    draw_calibration_curve(y_test, y_pred_prob, model)
+    return model_result
+
+
+def pipeline_randomF_benchmark(X_train, y_train, X_test, y_test, model_result):
+    pipeline = Pipeline(steps=[
+    ('preprocessor', StandardScaler()),
+    ('randomF', RandomForestClassifier(class_weight = weight_dict,
+                                  n_jobs=-1))  
+])
+    pipeline.fit(X_train, y_train)
+
+    y_pred = pipeline.predict(X_test)
+    y_pred_prob = pipeline.predict_proba(X_test)[:, 1]
+    
+    fpr, tpr, thresholds = roc_curve(y_test, y_pred_prob, pos_label = 1)
+    model = "randomF"
+    result = pd.DataFrame({"Model" : [model],
+                       "Accuracy" : [accuracy_score(y_test, y_pred)],
+                       "Recall" : [recall_score(y_test, y_pred)],
+                       "F1_score" : [f1_score(y_test, y_pred, average="macro")],
+                       "AUC" : [auc(fpr, tpr)]}
+                       )
+    model_result = pd.concat([model_result, result])
+    
+    draw_confusion_matrix(y_test, y_pred, model)
+    draw_roc_curve(y_test, y_pred_prob, model)
+    draw_prob_distribution(y_pred_prob, model)
+    draw_calibration_curve(y_test, y_pred_prob, model)
+    return model_result
+
+
+def pipeline_randomF_cv(X_train, y_train, X_test, y_test, model_result):
+    param_grid = {
+    'randomF_cv__n_estimators': [100, 300],
+    'randomF_cv__max_features': ['sqrt', 'log2'],
+    'randomF_cv__min_samples_split': [2, 10],
+    'randomF_cv__min_samples_leaf': [1, 4],
+    'randomF_cv__class_weight': [weight_dict]
+}
+    pipeline = Pipeline(steps=[
+    ('preprocessor', StandardScaler()),
+    ('randomF_cv', RandomForestClassifier(n_jobs=-1))  
+])
+    grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring=make_scorer(f1_score), error_score='raise',
+                          n_jobs=-1)
+
+    grid_search.fit(X_train, y_train)
+    y_pred = grid_search.predict(X_test)
+    y_pred_prob = grid_search.predict_proba(X_test)[:, 1]
+    best_pipeline = grid_search.best_estimator_
+    fpr, tpr, thresholds = roc_curve(y_test, y_pred_prob, pos_label = 1)
+    model = "randomF_cv"
+    result = pd.DataFrame({"Model" : [model],
+                       "Accuracy" : [accuracy_score(y_test, y_pred)],
+                       "Recall" : [recall_score(y_test, y_pred)],
+                       "F1_score" : [f1_score(y_test, y_pred, average="macro")],
+                       "AUC" : [auc(fpr, tpr)]}
+                       )
+    model_result = pd.concat([model_result, result])
+    
+    draw_confusion_matrix(y_test, y_pred, model)
+    draw_roc_curve(y_test, y_pred_prob, model)
+    draw_prob_distribution(y_pred_prob, model)
+    draw_calibration_curve(y_test, y_pred_prob, model)
+    return model_result
+
+
+def pipeline_xgb_benchmark(X_train, y_train, X_test, y_test, model_result):
+    pipeline = Pipeline(steps=[
+    ('preprocessor', StandardScaler()),
+    ('XGB_Benchmark', XGBClassifier())  
+])
+    pipeline.fit(X_train, y_train)
+
+    y_pred = pipeline.predict(X_test)
+    y_pred_prob = pipeline.predict_proba(X_test)[:, 1]
+    
+    fpr, tpr, thresholds = roc_curve(y_test, y_pred_prob, pos_label = 1)
+    model = "XGB_Benchmark"
+    result = pd.DataFrame({"Model" : [model],
+                       "Accuracy" : [accuracy_score(y_test, y_pred)],
+                       "Recall" : [recall_score(y_test, y_pred)],
+                       "F1_score" : [f1_score(y_test, y_pred, average="macro")],
+                       "AUC" : [auc(fpr, tpr)]}
+                       )
+    model_result = pd.concat([model_result, result])
+
+    
+    draw_confusion_matrix(y_test, y_pred, model)
+    draw_roc_curve(y_test, y_pred_prob, model)
+    draw_prob_distribution(y_pred_prob, model)
+    draw_calibration_curve(y_test, y_pred_prob, model)
+    return model_result
+
+
+def pipeline_xgb_cv(X_train, y_train, X_test, y_test, model_result):
+    param_grid = {
+    'XGB_cv__learning_rate': [0.1, 0.01],
+    'XGB_cv__n_estimators': [50, 100, 200],
+    'XGB_cv__gamma': [0, 0.1, 0.01],
+    'XGB_cv__scale_pos_weight' : [None] + list(weights)
+}
+    pipeline = Pipeline(steps=[
+    ('preprocessor', StandardScaler()),
+    ('XGB_cv', XGBClassifier(n_jobs=-1))  
+])
+    grid_search = RandomizedSearchCV(pipeline, param_grid, cv=cv, scoring=make_scorer(f1_score), error_score='raise',
+                          n_jobs=-1)
+
+    grid_search.fit(X_train, y_train)
+    y_pred = grid_search.predict(X_test)
+    y_pred_prob = grid_search.predict_proba(X_test)[:, 1]
+    best_pipeline = grid_search.best_estimator_
+    fpr, tpr, thresholds = roc_curve(y_test, y_pred_prob, pos_label = 1)
+    model = "XGB_cv"
+    result = pd.DataFrame({"Model" : [model],
+                       "Accuracy" : [accuracy_score(y_test, y_pred)],
+                       "Recall" : [recall_score(y_test, y_pred)],
+                       "F1_score" : [f1_score(y_test, y_pred, average="macro")],
+                       "AUC" : [auc(fpr, tpr)]}
+                       )
+    model_result = pd.concat([model_result, result])
+    
+    draw_confusion_matrix(y_test, y_pred, model)
+    draw_roc_curve(y_test, y_pred_prob, model)
+    draw_prob_distribution(y_pred_prob, model)
+    draw_calibration_curve(y_test, y_pred_prob, model)
+    return model_result
