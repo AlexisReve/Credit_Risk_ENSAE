@@ -118,7 +118,7 @@ def pipeline_logreg_cv(X_train, y_train, X_test, y_test, model_result):
     ('preprocessor', StandardScaler()),
     ('LogisticRegression_cv', LogisticRegression(solver='saga', max_iter=5000))  
 ])
-    grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring=make_scorer(f1_score), error_score='raise',
+    grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='roc_auc', error_score='raise',
                           n_jobs=-1)
 
     grid_search.fit(X_train, y_train)
@@ -182,7 +182,7 @@ def pipeline_randomF_cv(X_train, y_train, X_test, y_test, model_result):
     ('preprocessor', StandardScaler()),
     ('randomF_cv', RandomForestClassifier(n_jobs=-1))  
 ])
-    grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring=make_scorer(f1_score), error_score='raise',
+    grid_search = GridSearchCV(pipeline, param_grid, cv=3, scoring='roc_auc', error_score='raise',
                           n_jobs=-1)
 
     grid_search.fit(X_train, y_train)
@@ -245,7 +245,7 @@ def pipeline_xgb_cv(X_train, y_train, X_test, y_test, model_result):
     ('preprocessor', StandardScaler()),
     ('XGB_cv', XGBClassifier(n_jobs=-1))  
 ])
-    grid_search = RandomizedSearchCV(pipeline, param_grid, cv=cv, scoring=make_scorer(f1_score), error_score='raise',
+    grid_search = RandomizedSearchCV(pipeline, param_grid, cv=cv, scoring='roc_auc', error_score='raise',
                           n_jobs=-1)
 
     grid_search.fit(X_train, y_train)
