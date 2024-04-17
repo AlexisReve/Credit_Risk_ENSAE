@@ -47,7 +47,7 @@ def draw_roc_curve(y_test, y_pred_prob, model):
     plt.grid(color='gray', linestyle='--', linewidth=0.5)
     plt.xlabel("False Positive Rate")
     plt.ylabel("True Positive Rate")
-    plt.title("ROC Curve", size=18)
+    plt.title("ROC Curve : {}".format(model), size=18)
     plt.legend(loc="lower right")
     plt.show()
 
