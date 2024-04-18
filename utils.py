@@ -80,7 +80,23 @@ def draw_prob_distribution(y_pred_prob, model):
     plt.show()
 
 
-def pipeline_logreg_benchmark(X_train, y_train, X_test, y_test, model_result):
+def top_features(features_importance , pipeline, model, randomF = False):
+    if randomF:
+        coefficients = pipeline.named_steps[model].feature_importances_
+    else:
+        coefficients = pipeline.named_steps[model].coef_[0]
+    
+    feature_names = pipeline.named_steps['preprocessor'].get_feature_names_out()
+    feature_importance_df = pd.DataFrame({
+        'Feature': feature_names,
+        'Importance': coefficients
+    })
+    top_features = feature_importance_df.sort_values(by='Importance', ascending=False)['Feature'][:5]
+    features_importance[model] = top_features
+    return features_importance
+
+
+def pipeline_logreg_benchmark(X_train, y_train, X_test, y_test, model_result, features_importance):
     pipeline = Pipeline(steps=[
     ('preprocessor', StandardScaler()),
     ('LogisticRegression_Benchmark', LogisticRegression(solver='saga', class_weight = weight_dict,
@@ -100,16 +116,15 @@ def pipeline_logreg_benchmark(X_train, y_train, X_test, y_test, model_result):
                        "AUC" : [auc(fpr, tpr)]}
                        )
     model_result = pd.concat([model_result, result])
-
-    
+    features_importance = top_features(features_importance , pipeline, model, randomF = False)
     draw_confusion_matrix(y_test, y_pred, model)
     draw_roc_curve(y_test, y_pred_prob, model)
     draw_prob_distribution(y_pred_prob, model)
     draw_calibration_curve(y_test, y_pred_prob, model)
-    return model_result
+    return model_result, features_importance
 
 
-def pipeline_logreg_cv(X_train, y_train, X_test, y_test, model_result):
+def pipeline_logreg_cv(X_train, y_train, X_test, y_test, model_result, features_importance):
     #y_train = y_train['SeriousDlqin2yrs']
     param_grid = {'LogisticRegression_cv__C': np.logspace(-10, 6, 17, base=2),
               'LogisticRegression_cv__penalty': ['l1', 'l2'],
@@ -135,14 +150,15 @@ def pipeline_logreg_cv(X_train, y_train, X_test, y_test, model_result):
                        )
     model_result = pd.concat([model_result, result])
     
+    features_importance = top_features(features_importance , best_pipeline, model, randomF = False)
     draw_confusion_matrix(y_test, y_pred, model)
     draw_roc_curve(y_test, y_pred_prob, model)
     draw_prob_distribution(y_pred_prob, model)
     draw_calibration_curve(y_test, y_pred_prob, model)
-    return model_result
+    return model_result, features_importance
 
 
-def pipeline_randomF_benchmark(X_train, y_train, X_test, y_test, model_result):
+def pipeline_randomF_benchmark(X_train, y_train, X_test, y_test, model_result, features_importance):
     pipeline = Pipeline(steps=[
     ('preprocessor', StandardScaler()),
     ('randomF', RandomForestClassifier(class_weight = weight_dict,
@@ -163,14 +179,15 @@ def pipeline_randomF_benchmark(X_train, y_train, X_test, y_test, model_result):
                        )
     model_result = pd.concat([model_result, result])
     
+    features_importance = top_features(features_importance , pipeline, model, randomF = True)
     draw_confusion_matrix(y_test, y_pred, model)
     draw_roc_curve(y_test, y_pred_prob, model)
     draw_prob_distribution(y_pred_prob, model)
     draw_calibration_curve(y_test, y_pred_prob, model)
-    return model_result
+    return model_result, features_importance
 
 
-def pipeline_randomF_cv(X_train, y_train, X_test, y_test, model_result):
+def pipeline_randomF_cv(X_train, y_train, X_test, y_test, model_result, features_importance):
     param_grid = {
     'randomF_cv__n_estimators': [100, 300],
     'randomF_cv__max_features': ['sqrt', 'log2'],
@@ -199,14 +216,15 @@ def pipeline_randomF_cv(X_train, y_train, X_test, y_test, model_result):
                        )
     model_result = pd.concat([model_result, result])
     
+    features_importance = top_features(features_importance , best_pipeline, model, randomF = True)
     draw_confusion_matrix(y_test, y_pred, model)
     draw_roc_curve(y_test, y_pred_prob, model)
     draw_prob_distribution(y_pred_prob, model)
     draw_calibration_curve(y_test, y_pred_prob, model)
-    return model_result
+    return model_result, features_importance
 
 
-def pipeline_xgb_benchmark(X_train, y_train, X_test, y_test, model_result):
+def pipeline_xgb_benchmark(X_train, y_train, X_test, y_test, model_result, features_importance):
     pipeline = Pipeline(steps=[
     ('preprocessor', StandardScaler()),
     ('XGB_Benchmark', XGBClassifier())  
@@ -225,16 +243,16 @@ def pipeline_xgb_benchmark(X_train, y_train, X_test, y_test, model_result):
                        "AUC" : [auc(fpr, tpr)]}
                        )
     model_result = pd.concat([model_result, result])
-
     
+    features_importance = top_features(features_importance , pipeline, model, randomF = True)
     draw_confusion_matrix(y_test, y_pred, model)
     draw_roc_curve(y_test, y_pred_prob, model)
     draw_prob_distribution(y_pred_prob, model)
     draw_calibration_curve(y_test, y_pred_prob, model)
-    return model_result
+    return model_result, features_importance
 
 
-def pipeline_xgb_cv(X_train, y_train, X_test, y_test, model_result):
+def pipeline_xgb_cv(X_train, y_train, X_test, y_test, model_result, features_importance):
     param_grid = {
     'XGB_cv__learning_rate': [0.1, 0.01],
     'XGB_cv__n_estimators': [50, 100, 200],
@@ -261,9 +279,10 @@ def pipeline_xgb_cv(X_train, y_train, X_test, y_test, model_result):
                        "AUC" : [auc(fpr, tpr)]}
                        )
     model_result = pd.concat([model_result, result])
-    
+    pickle.dump(best_pipeline, open('model/xgb_model.pkl', 'wb'))
+    features_importance = top_features(features_importance , best_pipeline, model, randomF = True)
     draw_confusion_matrix(y_test, y_pred, model)
     draw_roc_curve(y_test, y_pred_prob, model)
     draw_prob_distribution(y_pred_prob, model)
     draw_calibration_curve(y_test, y_pred_prob, model)
-    return model_result
+    return model_result, features_importance
